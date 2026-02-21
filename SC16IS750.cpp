@@ -19,55 +19,63 @@ CC BY-NC-SA 3.0
 Please keep the above information when you use this code in your project.
 */
 
-
-//#define SC16IS750_DEBUG_PRINT
+// #define SC16IS750_DEBUG_PRINT
 #include <SC16IS750.h>
 #include <SPI.h>
 #include <Wire.h>
 
-
-#ifdef __AVR__
- #define WIRE Wire
-#else // Arduino Due
- #define WIRE Wire1
-#endif
-
-
+#ifdef USER_WIRE
+SC16IS750::SC16IS750(TwoWire &WirePort, uint8_t prtcl, uint8_t addr_sspin)
+: m_WirePort(WirePort)
+{
+    protocol = prtcl;
+    device_address_sspin = addr_sspin;
+    peek_flag = 0;
+}
+#else
 SC16IS750::SC16IS750(uint8_t prtcl, uint8_t addr_sspin)
 {
     protocol = prtcl;
-    if ( protocol == SC16IS750_PROTOCOL_I2C ) {
-		device_address_sspin = (addr_sspin>>1);
-	} else {
-		device_address_sspin = addr_sspin;
-	}
-	peek_flag = 0;
-//	timeout = 1000;
+    device_address_sspin = addr_sspin;
+    peek_flag = 0;
 }
+#endif
 
 
-void SC16IS750::begin(uint32_t baud)
+int SC16IS750::begin(uint32_t crystal_freq, uint32_t baud)
 {
-    //Serial.println("1111111111111111");
-	if ( protocol == SC16IS750_PROTOCOL_I2C) {
-	//Serial.println("22222222222222");
+    // Serial.println("1111111111111111");
+    m_crystal_freq = crystal_freq;
+    if (protocol == SC16IS750_PROTOCOL_I2C)
+    {
+        // Serial.println("22222222222222");
+#ifndef USER_WIRE
         WIRE.begin();
-    } else {
-	//Serial.println("3333333333333333333");
-		::pinMode(device_address_sspin, OUTPUT);
-   	    ::digitalWrite(device_address_sspin, HIGH);
-		SPI.setDataMode(SPI_MODE0);
-		SPI.setClockDivider(SPI_CLOCK_DIV4);
-		SPI.setBitOrder(MSBFIRST);
-		SPI.begin();
-		//SPI.setClockDivider(32);
+#endif
+    }
+    else
+    {
+        // Serial.println("3333333333333333333");
+        ::pinMode(device_address_sspin, OUTPUT);
+        ::digitalWrite(device_address_sspin, HIGH);
+        SPI.setDataMode(SPI_MODE0);
+        SPI.setClockDivider(SPI_CLOCK_DIV4);
+        SPI.setBitOrder(MSBFIRST);
+        SPI.begin();
+        // SPI.setClockDivider(32);
 
-	//Serial.println("4444444444444444444");
-	};
+        // Serial.println("4444444444444444444");
+    };
+    if (!isConnected())
+    {
+        Serial.println("SC16IS750 not detected at address 0x" + String(device_address_sspin, HEX));
+        return 1;
+    }
     ResetDevice();
     FIFOEnable(1);
-	SetBaudrate(baud);
-    SetLine(8,0,1);
+    SetBaudrate(baud);
+    SetLine(8, 0, 1);
+    return 0;
 }
 
 int SC16IS750::available(void)
@@ -77,17 +85,21 @@ int SC16IS750::available(void)
 
 int SC16IS750::read(void)
 {
-	if ( peek_flag == 0) {
-		return ReadByte();
-	} else {
-		peek_flag = 0;
-		return peek_buf;
-	}
+    if (peek_flag == 0)
+    {
+        return ReadByte();
+    }
+    else
+    {
+        peek_flag = 0;
+        return peek_buf;
+    }
 }
 
 size_t SC16IS750::write(uint8_t val)
 {
     WriteByte(val);
+    return 0;
 }
 
 void SC16IS750::pinMode(uint8_t pin, uint8_t i_o)
@@ -102,146 +114,164 @@ void SC16IS750::digitalWrite(uint8_t pin, uint8_t value)
 
 uint8_t SC16IS750::digitalRead(uint8_t pin)
 {
-   return GPIOGetPinState(pin);
+    return GPIOGetPinState(pin);
 }
-
 
 uint8_t SC16IS750::ReadRegister(uint8_t reg_addr)
 {
     uint8_t result;
-	if ( protocol == SC16IS750_PROTOCOL_I2C ) {  // register read operation via I2C
+    if (protocol == SC16IS750_PROTOCOL_I2C)
+    { // register read operation via I2C
 
-		WIRE.beginTransmission(device_address_sspin);
-		WIRE.write((reg_addr<<3));
-		WIRE.endTransmission(0);
-		WIRE.requestFrom(device_address_sspin,(uint8_t)1);
-		result = WIRE.read();
-	} else if (protocol == SC16IS750_PROTOCOL_SPI) {                                   //register read operation via SPI
-		::digitalWrite(device_address_sspin, LOW);
-		delayMicroseconds(10);
-		SPI.transfer(0x80|(reg_addr<<3));
-		result = SPI.transfer(0xff);
-		delayMicroseconds(10);
-		::digitalWrite(device_address_sspin, HIGH);
-	}
+        WIRE.beginTransmission(device_address_sspin);
+        WIRE.write((reg_addr << 3));
+        WIRE.endTransmission(0);
+        WIRE.requestFrom(device_address_sspin, (uint8_t)1);
+        result = WIRE.read();
+    }
+    else if (protocol == SC16IS750_PROTOCOL_SPI)
+    { // register read operation via SPI
+        ::digitalWrite(device_address_sspin, LOW);
+        delayMicroseconds(10);
+        SPI.transfer(0x80 | (reg_addr << 3));
+        result = SPI.transfer(0xff);
+        delayMicroseconds(10);
+        ::digitalWrite(device_address_sspin, HIGH);
+    }
 
-	return result;
-
+    return result;
 }
 
 void SC16IS750::WriteRegister(uint8_t reg_addr, uint8_t val)
 {
-    if ( protocol == SC16IS750_PROTOCOL_I2C ) {  // register read operation via I2C
-		WIRE.beginTransmission(device_address_sspin);
-		WIRE.write((reg_addr<<3));
-		WIRE.write(val);
-		WIRE.endTransmission(1);
-	} else {
-		::digitalWrite(device_address_sspin, LOW);
-		delayMicroseconds(10);
-		SPI.transfer(reg_addr<<3);
-		SPI.transfer(val);
-		delayMicroseconds(10);
-		::digitalWrite(device_address_sspin, HIGH);
+    if (protocol == SC16IS750_PROTOCOL_I2C)
+    { // register read operation via I2C
+        WIRE.beginTransmission(device_address_sspin);
+        WIRE.write((reg_addr << 3));
+        WIRE.write(val);
+        WIRE.endTransmission(1);
+    }
+    else
+    {
+        ::digitalWrite(device_address_sspin, LOW);
+        delayMicroseconds(10);
+        SPI.transfer(reg_addr << 3);
+        SPI.transfer(val);
+        delayMicroseconds(10);
+        ::digitalWrite(device_address_sspin, HIGH);
+    }
 
-	}
-
-
-    return ;
+    return;
 }
 
-int16_t SC16IS750::SetBaudrate(uint32_t baudrate) //return error of baudrate parts per thousand
+int16_t SC16IS750::SetBaudrate(uint32_t baudrate) // return error of baudrate parts per thousand
 {
-    uint16_t divisor;
-    uint8_t prescaler;
-    uint32_t actual_baudrate;
-    int16_t error;
-    uint8_t temp_lcr;
-    if ( (ReadRegister(SC16IS750_REG_MCR)&0x80) == 0) { //if prescaler==1
+    // FORCE NORMAL REGISTER MAP
+    uint8_t lcr = ReadRegister(SC16IS750_REG_LCR);
+    lcr &= ~(1 << 7);        // clear DLAB
+    WriteRegister(SC16IS750_REG_LCR, lcr);
+
+    uint64_t divisor;
+    uint64_t prescaler;
+    uint64_t actual_baudrate;
+    uint64_t error;
+    uint64_t temp_lcr;
+    if (baudrate == 0)
+    {
+        baudrate = 2400;
+    }
+    uint8_t mcr = ReadRegister(SC16IS750_REG_MCR);
+    mcr &= ~(1 << 7);
+    WriteRegister(SC16IS750_REG_MCR, mcr);
+    if ((ReadRegister(SC16IS750_REG_MCR) & 0x80) == 0)
+    { // if prescaler==1
         prescaler = 1;
-    } else {
+    }
+    else
+    {
         prescaler = 4;
     }
 
-    divisor = (SC16IS750_CRYSTCAL_FREQ/prescaler)/(baudrate*16);
+    divisor = (SC16IS750_CRYSTCAL_FREQ / prescaler) / (baudrate * 16);
 
     temp_lcr = ReadRegister(SC16IS750_REG_LCR);
     temp_lcr |= 0x80;
-    WriteRegister(SC16IS750_REG_LCR,temp_lcr);
-    //write to DLL
-    WriteRegister(SC16IS750_REG_DLL,(uint8_t)divisor);
-    //write to DLH
-    WriteRegister(SC16IS750_REG_DLH,(uint8_t)(divisor>>8));
+    WriteRegister(SC16IS750_REG_LCR, temp_lcr);
+    // write to DLL
+    WriteRegister(SC16IS750_REG_DLL, (uint8_t)divisor);
+    // write to DLH
+    WriteRegister(SC16IS750_REG_DLH, (uint8_t)(divisor >> 8));
     temp_lcr &= 0x7F;
-    WriteRegister(SC16IS750_REG_LCR,temp_lcr);
+    WriteRegister(SC16IS750_REG_LCR, temp_lcr);
 
-
-    actual_baudrate = (SC16IS750_CRYSTCAL_FREQ/prescaler)/(16*divisor);
-    error = ((float)actual_baudrate-baudrate)*1000/baudrate;
-#ifdef  SC16IS750_DEBUG_PRINT
+    actual_baudrate = (SC16IS750_CRYSTCAL_FREQ / prescaler) / (16 * divisor);
+    error = ((float)actual_baudrate - baudrate) * 1000 / baudrate;
+#ifdef SC16IS750_DEBUG_PRINT
     Serial.print("Desired baudrate: ");
-    Serial.println(baudrate,DEC);
+    Serial.println(baudrate, DEC);
     Serial.print("Calculated divisor: ");
-    Serial.println(divisor,DEC);
+    Serial.println(divisor, DEC);
     Serial.print("Actual baudrate: ");
-    Serial.println(actual_baudrate,DEC);
+    Serial.println(actual_baudrate, DEC);
     Serial.print("Baudrate error: ");
-    Serial.println(error,DEC);
+    Serial.println(error, DEC);
 #endif
 
     return error;
-
 }
 
-void SC16IS750::SetLine(uint8_t data_length, uint8_t parity_select, uint8_t stop_length )
+void SC16IS750::SetLine(uint8_t data_length, uint8_t parity_select, uint8_t stop_length)
 {
     uint8_t temp_lcr;
     temp_lcr = ReadRegister(SC16IS750_REG_LCR);
-    temp_lcr &= 0xC0; //Clear the lower six bit of LCR (LCR[0] to LCR[5]
-#ifdef  SC16IS750_DEBUG_PRINT
+    temp_lcr &= 0xC0; // Clear the lower six bit of LCR (LCR[0] to LCR[5]
+#ifdef SC16IS750_DEBUG_PRINT
     Serial.print("LCR Register:0x");
-    Serial.println(temp_lcr,DEC);
+    Serial.println(temp_lcr, DEC);
 #endif
-    switch (data_length) {            //data length settings
-        case 5:
-            break;
-        case 6:
-            temp_lcr |= 0x01;
-            break;
-        case 7:
-            temp_lcr |= 0x02;
-            break;
-        case 8:
-            temp_lcr |= 0x03;
-            break;
-        default:
-            temp_lcr |= 0x03;
-            break;
+    switch (data_length)
+    { // data length settings
+    case 5:
+        break;
+    case 6:
+        temp_lcr |= 0x01;
+        break;
+    case 7:
+        temp_lcr |= 0x02;
+        break;
+    case 8:
+        temp_lcr |= 0x03;
+        break;
+    default:
+        temp_lcr |= 0x03;
+        break;
     }
 
-    if ( stop_length == 2 ) {
+    if (stop_length == 2)
+    {
         temp_lcr |= 0x04;
     }
 
-    switch (parity_select) {            //parity selection length settings
-        case 0:                         //no parity
-             break;
-        case 1:                         //odd parity
-            temp_lcr |= 0x08;
-            break;
-        case 2:                         //even parity
-            temp_lcr |= 0x18;
-            break;
-        case 3:                         //force '1' parity
-            temp_lcr |= 0x03;
-            break;
-        case 4:                         //force '0' parity
-            break;
-        default:
-            break;
+    switch (parity_select)
+    {       // parity selection length settings
+    case 0: // no parity
+        break;
+    case 1: // odd parity
+        temp_lcr |= 0x08;
+        break;
+    case 2: // even parity
+        temp_lcr |= 0x18;
+        break;
+    case 3: // force '1' parity
+        temp_lcr |= 0x03;
+        break;
+    case 4: // force '0' parity
+        break;
+    default:
+        break;
     }
 
-    WriteRegister(SC16IS750_REG_LCR,temp_lcr);
+    WriteRegister(SC16IS750_REG_LCR, temp_lcr);
 }
 
 void SC16IS750::GPIOSetPinMode(uint8_t pin_number, uint8_t i_o)
@@ -249,10 +279,13 @@ void SC16IS750::GPIOSetPinMode(uint8_t pin_number, uint8_t i_o)
     uint8_t temp_iodir;
 
     temp_iodir = ReadRegister(SC16IS750_REG_IODIR);
-    if ( i_o == OUTPUT ) {
-      temp_iodir |= (0x01 << pin_number);
-    } else {
-      temp_iodir &= (uint8_t)~(0x01 << pin_number);
+    if (i_o == OUTPUT)
+    {
+        temp_iodir |= (0x01 << pin_number);
+    }
+    else
+    {
+        temp_iodir &= (uint8_t)~(0x01 << pin_number);
     }
 
     WriteRegister(SC16IS750_REG_IODIR, temp_iodir);
@@ -264,24 +297,27 @@ void SC16IS750::GPIOSetPinState(uint8_t pin_number, uint8_t pin_state)
     uint8_t temp_iostate;
 
     temp_iostate = ReadRegister(SC16IS750_REG_IOSTATE);
-    if ( pin_state == 1 ) {
-      temp_iostate |= (0x01 << pin_number);
-    } else {
-      temp_iostate &= (uint8_t)~(0x01 << pin_number);
+    if (pin_state == 1)
+    {
+        temp_iostate |= (0x01 << pin_number);
+    }
+    else
+    {
+        temp_iostate &= (uint8_t)~(0x01 << pin_number);
     }
 
     WriteRegister(SC16IS750_REG_IOSTATE, temp_iostate);
     return;
 }
 
-
 uint8_t SC16IS750::GPIOGetPinState(uint8_t pin_number)
 {
     uint8_t temp_iostate;
 
     temp_iostate = ReadRegister(SC16IS750_REG_IOSTATE);
-    if ( temp_iostate & (0x01 << pin_number)== 0 ) {
-      return 0;
+    if (temp_iostate & (0x01 << pin_number) == 0)
+    {
+        return 0;
     }
     return 1;
 }
@@ -290,7 +326,6 @@ uint8_t SC16IS750::GPIOGetPortState(void)
 {
 
     return ReadRegister(SC16IS750_REG_IOSTATE);
-
 }
 
 void SC16IS750::GPIOSetPortMode(uint8_t port_io)
@@ -322,14 +357,17 @@ void SC16IS750::ResetDevice(void)
     return;
 }
 
-void SC16IS750::ModemPin(uint8_t gpio) //gpio == 0, gpio[7:4] are modem pins, gpio == 1 gpio[7:4] are gpios
+void SC16IS750::ModemPin(uint8_t gpio) // gpio == 0, gpio[7:4] are modem pins, gpio == 1 gpio[7:4] are gpios
 {
     uint8_t temp_iocontrol;
 
     temp_iocontrol = ReadRegister(SC16IS750_REG_IOCONTROL);
-    if ( gpio == 0 ) {
+    if (gpio == 0)
+    {
         temp_iocontrol |= 0x02;
-    } else {
+    }
+    else
+    {
         temp_iocontrol &= 0xFD;
     }
     WriteRegister(SC16IS750_REG_IOCONTROL, temp_iocontrol);
@@ -342,14 +380,25 @@ void SC16IS750::GPIOLatch(uint8_t latch)
     uint8_t temp_iocontrol;
 
     temp_iocontrol = ReadRegister(SC16IS750_REG_IOCONTROL);
-    if ( latch == 0 ) {
+    if (latch == 0)
+    {
         temp_iocontrol &= 0xFE;
-    } else {
+    }
+    else
+    {
         temp_iocontrol |= 0x01;
     }
     WriteRegister(SC16IS750_REG_IOCONTROL, temp_iocontrol);
 
     return;
+}
+
+bool SC16IS750::isConnected()
+{
+  	WIRE.beginTransmission(device_address_sspin);
+  	if (WIRE.endTransmission() != 0)
+    	return (false); //Sensor did not ACK
+  	return (true);
 }
 
 void SC16IS750::InterruptControl(uint8_t int_ena)
@@ -370,25 +419,26 @@ void SC16IS750::__isr(void)
     irq_src = (irq_src >> 1);
     irq_src &= 0x3F;
 
-    switch (irq_src) {
-        case 0x06:                  //Receiver Line Status Error
-            break;
-        case 0x0c:               //Receiver time-out interrupt
-            break;
-        case 0x04:               //RHR interrupt
-            break;
-        case 0x02:               //THR interrupt
-            break;
-        case 0x00:                  //modem interrupt;
-            break;
-        case 0x30:                  //input pin change of state
-            break;
-        case 0x10:                  //XOFF
-            break;
-        case 0x20:                  //CTS,RTS
-            break;
-        default:
-            break;
+    switch (irq_src)
+    {
+    case 0x06: // Receiver Line Status Error
+        break;
+    case 0x0c: // Receiver time-out interrupt
+        break;
+    case 0x04: // RHR interrupt
+        break;
+    case 0x02: // THR interrupt
+        break;
+    case 0x00: // modem interrupt;
+        break;
+    case 0x30: // input pin change of state
+        break;
+    case 0x10: // XOFF
+        break;
+    case 0x20: // CTS,RTS
+        break;
+    default:
+        break;
     }
     return;
 }
@@ -399,31 +449,36 @@ void SC16IS750::FIFOEnable(uint8_t fifo_enable)
 
     temp_fcr = ReadRegister(SC16IS750_REG_FCR);
 
-    if (fifo_enable == 0){
+    if (fifo_enable == 0)
+    {
         temp_fcr &= 0xFE;
-    } else {
+    }
+    else
+    {
         temp_fcr |= 0x01;
     }
-    WriteRegister(SC16IS750_REG_FCR,temp_fcr);
+    WriteRegister(SC16IS750_REG_FCR, temp_fcr);
 
     return;
 }
 
 void SC16IS750::FIFOReset(uint8_t rx_fifo)
 {
-     uint8_t temp_fcr;
+    uint8_t temp_fcr;
 
     temp_fcr = ReadRegister(SC16IS750_REG_FCR);
 
-    if (rx_fifo == 0){
+    if (rx_fifo == 0)
+    {
         temp_fcr |= 0x04;
-    } else {
+    }
+    else
+    {
         temp_fcr |= 0x02;
     }
-    WriteRegister(SC16IS750_REG_FCR,temp_fcr);
+    WriteRegister(SC16IS750_REG_FCR, temp_fcr);
 
     return;
-
 }
 
 void SC16IS750::FIFOSetTriggerLevel(uint8_t rx_fifo, uint8_t length)
@@ -432,132 +487,136 @@ void SC16IS750::FIFOSetTriggerLevel(uint8_t rx_fifo, uint8_t length)
 
     temp_reg = ReadRegister(SC16IS750_REG_MCR);
     temp_reg |= 0x04;
-    WriteRegister(SC16IS750_REG_MCR,temp_reg); //SET MCR[2] to '1' to use TLR register or trigger level control in FCR register
+    WriteRegister(SC16IS750_REG_MCR, temp_reg); // SET MCR[2] to '1' to use TLR register or trigger level control in FCR register
 
     temp_reg = ReadRegister(SC16IS750_REG_EFR);
-    WriteRegister(SC16IS750_REG_EFR, temp_reg|0x10); //set ERF[4] to '1' to use the  enhanced features
-    if (rx_fifo == 0) {
-        WriteRegister(SC16IS750_REG_TLR, length<<4); //Tx FIFO trigger level setting
-    } else {
-        WriteRegister(SC16IS750_REG_TLR, length);    //Rx FIFO Trigger level setting
+    WriteRegister(SC16IS750_REG_EFR, temp_reg | 0x10); // set ERF[4] to '1' to use the  enhanced features
+    if (rx_fifo == 0)
+    {
+        WriteRegister(SC16IS750_REG_TLR, length << 4); // Tx FIFO trigger level setting
     }
-    WriteRegister(SC16IS750_REG_EFR, temp_reg); //restore EFR register
+    else
+    {
+        WriteRegister(SC16IS750_REG_TLR, length); // Rx FIFO Trigger level setting
+    }
+    WriteRegister(SC16IS750_REG_EFR, temp_reg); // restore EFR register
 
     return;
 }
 
 uint8_t SC16IS750::FIFOAvailableData(void)
 {
-#ifdef  SC16IS750_DEBUG_PRINT
+#ifdef SC16IS750_DEBUG_PRINT
     Serial.print("=====Available data:");
     Serial.println(ReadRegister(SC16IS750_REG_RXLVL), DEC);
 #endif
-   return ReadRegister(SC16IS750_REG_RXLVL);
-//    return ReadRegister(SC16IS750_REG_LSR) & 0x01;
+    return ReadRegister(SC16IS750_REG_RXLVL);
+    //    return ReadRegister(SC16IS750_REG_LSR) & 0x01;
 }
 
 uint8_t SC16IS750::FIFOAvailableSpace(void)
 {
-   return ReadRegister(SC16IS750_REG_TXLVL);
-
+    return ReadRegister(SC16IS750_REG_TXLVL);
 }
 
 void SC16IS750::WriteByte(uint8_t val)
 {
-	uint8_t tmp_lsr;
- /*   while ( FIFOAvailableSpace() == 0 ){
-#ifdef  SC16IS750_DEBUG_PRINT
-		Serial.println("No available space");
-#endif
+    uint8_t tmp_lsr;
+    /*   while ( FIFOAvailableSpace() == 0 ){
+   #ifdef  SC16IS750_DEBUG_PRINT
+           Serial.println("No available space");
+   #endif
 
-	};
+       };
 
-#ifdef  SC16IS750_DEBUG_PRINT
-    Serial.println("++++++++++++Data sent");
-#endif
-    WriteRegister(SC16IS750_REG_THR,val);
-*/
-	do {
-		tmp_lsr = ReadRegister(SC16IS750_REG_LSR);
-	} while ((tmp_lsr&0x20) ==0);
+   #ifdef  SC16IS750_DEBUG_PRINT
+       Serial.println("++++++++++++Data sent");
+   #endif
+       WriteRegister(SC16IS750_REG_THR,val);
+   */
+    do
+    {
+        tmp_lsr = ReadRegister(SC16IS750_REG_LSR);
+    } while ((tmp_lsr & 0x20) == 0);
 
-	WriteRegister(SC16IS750_REG_THR,val);
-
-
-
+    WriteRegister(SC16IS750_REG_THR, val);
 }
 
 int SC16IS750::ReadByte(void)
 {
-	volatile uint8_t val;
-	if (FIFOAvailableData() == 0) {
-#ifdef  SC16IS750_DEBUG_PRINT
-	Serial.println("No data available");
+    volatile uint8_t val;
+    if (FIFOAvailableData() == 0)
+    {
+#ifdef SC16IS750_DEBUG_PRINT
+        Serial.println("No data available");
 #endif
-		return -1;
+        return -1;
+    }
+    else
+    {
 
-	} else {
-
-#ifdef  SC16IS750_DEBUG_PRINT
-	Serial.println("***********Data available***********");
+#ifdef SC16IS750_DEBUG_PRINT
+        Serial.println("***********Data available***********");
 #endif
-	  val = ReadRegister(SC16IS750_REG_RHR);
-	  return val;
-	}
-
-
+        val = ReadRegister(SC16IS750_REG_RHR);
+        return val;
+    }
 }
 
 void SC16IS750::EnableTransmit(uint8_t tx_enable)
 {
     uint8_t temp_efcr;
     temp_efcr = ReadRegister(SC16IS750_REG_EFCR);
-    if ( tx_enable == 0) {
+    if (tx_enable == 0)
+    {
         temp_efcr |= 0x04;
-    } else {
+    }
+    else
+    {
         temp_efcr &= 0xFB;
     }
-    WriteRegister(SC16IS750_REG_EFCR,temp_efcr);
+    WriteRegister(SC16IS750_REG_EFCR, temp_efcr);
 
     return;
 }
 
 uint8_t SC16IS750::ping()
 {
-	WriteRegister(SC16IS750_REG_SPR,0x55);
-	if (ReadRegister(SC16IS750_REG_SPR) !=0x55) {
-		return 0;
-	}
+    WriteRegister(SC16IS750_REG_SPR, 0x55);
+    if (ReadRegister(SC16IS750_REG_SPR) != 0x55)
+    {
+        return 0;
+    }
 
-	WriteRegister(SC16IS750_REG_SPR,0xAA);
-	if (ReadRegister(SC16IS750_REG_SPR) !=0xAA) {
-		return 0;
-	}
+    WriteRegister(SC16IS750_REG_SPR, 0xAA);
+    if (ReadRegister(SC16IS750_REG_SPR) != 0xAA)
+    {
+        return 0;
+    }
 
-	return 1;
-
+    return 1;
 }
 /*
 void SC16IS750::setTimeout(uint32_t time_out)
 {
-	timeout = time_out;
+    timeout = time_out;
 }
 
 size_t SC16IS750::readBytes(char *buffer, size_t length)
 {
-	size_t count=0;
-	int16_t tmp;
+    size_t count=0;
+    int16_t tmp;
 
-	while (count < length) {
-		tmp = readwithtimeout();
-		if (tmp < 0) {
-			break;
-		}
-		*buffer++ = (char)tmp;
-		count++;
-	}
+    while (count < length) {
+        tmp = readwithtimeout();
+        if (tmp < 0) {
+            break;
+        }
+        *buffer++ = (char)tmp;
+        count++;
+    }
 
-	return count;
+    return count;
 }
 
 int16_t SC16IS750::readwithtimeout()
@@ -575,24 +634,24 @@ int16_t SC16IS750::readwithtimeout()
 
 void SC16IS750::flush()
 {
-	uint8_t tmp_lsr;
+    uint8_t tmp_lsr;
 
-	do {
-		tmp_lsr = ReadRegister(SC16IS750_REG_LSR);
-	} while ((tmp_lsr&0x20) ==0);
-
-
+    do
+    {
+        tmp_lsr = ReadRegister(SC16IS750_REG_LSR);
+    } while ((tmp_lsr & 0x20) == 0);
 }
 
-int SC16IS750:: peek()
+int SC16IS750::peek()
 {
-	if ( peek_flag == 0 ) {
-		peek_buf =ReadByte();
-		if (  peek_buf >= 0 ) {
-			peek_flag = 1;
-		}
-	}
+    if (peek_flag == 0)
+    {
+        peek_buf = ReadByte();
+        if (peek_buf >= 0)
+        {
+            peek_flag = 1;
+        }
+    }
 
-	return peek_buf;
-
+    return peek_buf;
 }
