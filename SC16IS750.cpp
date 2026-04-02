@@ -119,7 +119,7 @@ uint8_t SC16IS750::digitalRead(uint8_t pin)
 
 uint8_t SC16IS750::ReadRegister(uint8_t reg_addr)
 {
-    uint8_t result;
+    uint8_t result = 0;
     if (protocol == SC16IS750_PROTOCOL_I2C)
     { // register read operation via I2C
 
@@ -315,7 +315,7 @@ uint8_t SC16IS750::GPIOGetPinState(uint8_t pin_number)
     uint8_t temp_iostate;
 
     temp_iostate = ReadRegister(SC16IS750_REG_IOSTATE);
-    if (temp_iostate & (0x01 << pin_number) == 0)
+    if ((temp_iostate & (0x01 << pin_number)) == 0)
     {
         return 0;
     }
