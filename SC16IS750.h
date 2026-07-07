@@ -25,6 +25,7 @@ Please keep the above information when you use this code in your project.
 #include "Arduino.h"
 
 #include "Wire.h"
+#include "SPI.h"
 
 // Device Address
 
@@ -87,7 +88,7 @@ Please keep the above information when you use this code in your project.
 #define WIRE Wire
 #elif defined(ESP32)
 #define USER_WIRE 1
-#define WIRE m_WirePort
+#define WIRE (*m_WirePort)
 #else // Arduino Due
 #define WIRE Wire1
 #endif
@@ -100,6 +101,7 @@ public:
 #else
     SC16IS750(uint8_t prtcl = SC16IS750_PROTOCOL_I2C, uint8_t addr_sspin = SC16IS750_ADDRESS_00);
 #endif
+    SC16IS750(SPIClass &spi, uint8_t cs_pin, uint32_t spi_freq = 4000000);
     int begin(uint32_t crystal_freq, uint32_t baud);
     int read();
     size_t write(uint8_t val);
@@ -151,8 +153,10 @@ private:
     uint8_t peek_flag;
 
 #ifdef USER_WIRE
-    TwoWire &m_WirePort;
+    TwoWire *m_WirePort = nullptr;
 #endif
+    SPIClass *m_spi = nullptr;
+    uint32_t m_spi_freq = 4000000;
 
     uint32_t m_crystal_freq;
 };

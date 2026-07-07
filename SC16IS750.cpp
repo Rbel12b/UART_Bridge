@@ -26,7 +26,7 @@ Please keep the above information when you use this code in your project.
 
 #ifdef USER_WIRE
 SC16IS750::SC16IS750(TwoWire &WirePort, uint8_t prtcl, uint8_t addr_sspin)
-: m_WirePort(WirePort)
+: m_WirePort(&WirePort)
 {
     protocol = prtcl;
     device_address_sspin = addr_sspin;
@@ -40,6 +40,15 @@ SC16IS750::SC16IS750(uint8_t prtcl, uint8_t addr_sspin)
     peek_flag = 0;
 }
 #endif
+
+SC16IS750::SC16IS750(SPIClass &spi, uint8_t cs_pin, uint32_t spi_freq)
+{
+    protocol = SC16IS750_PROTOCOL_SPI;
+    device_address_sspin = cs_pin;
+    m_spi = &spi;
+    m_spi_freq = spi_freq;
+    peek_flag = 0;
+}
 
 
 int SC16IS750::begin(uint32_t crystal_freq, uint32_t baud)
@@ -55,16 +64,9 @@ int SC16IS750::begin(uint32_t crystal_freq, uint32_t baud)
     }
     else
     {
-        // Serial.println("3333333333333333333");
         ::pinMode(device_address_sspin, OUTPUT);
         ::digitalWrite(device_address_sspin, HIGH);
-        SPI.setDataMode(SPI_MODE0);
-        SPI.setClockDivider(SPI_CLOCK_DIV4);
-        SPI.setBitOrder(MSBFIRST);
-        SPI.begin();
-        // SPI.setClockDivider(32);
-
-        // Serial.println("4444444444444444444");
+        // SPI bus is expected to be initialised by the caller.
     };
     if (!isConnected())
     {
@@ -131,12 +133,13 @@ uint8_t SC16IS750::ReadRegister(uint8_t reg_addr)
     }
     else if (protocol == SC16IS750_PROTOCOL_SPI)
     { // register read operation via SPI
+        SPIClass &spi = m_spi ? *m_spi : SPI;
+        spi.beginTransaction(SPISettings(m_spi_freq, MSBFIRST, SPI_MODE0));
         ::digitalWrite(device_address_sspin, LOW);
-        delayMicroseconds(10);
-        SPI.transfer(0x80 | (reg_addr << 3));
-        result = SPI.transfer(0xff);
-        delayMicroseconds(10);
+        spi.transfer(0x80 | (reg_addr << 3));
+        result = spi.transfer(0xff);
         ::digitalWrite(device_address_sspin, HIGH);
+        spi.endTransaction();
     }
 
     return result;
@@ -153,12 +156,13 @@ void SC16IS750::WriteRegister(uint8_t reg_addr, uint8_t val)
     }
     else
     {
+        SPIClass &spi = m_spi ? *m_spi : SPI;
+        spi.beginTransaction(SPISettings(m_spi_freq, MSBFIRST, SPI_MODE0));
         ::digitalWrite(device_address_sspin, LOW);
-        delayMicroseconds(10);
-        SPI.transfer(reg_addr << 3);
-        SPI.transfer(val);
-        delayMicroseconds(10);
+        spi.transfer(reg_addr << 3);
+        spi.transfer(val);
         ::digitalWrite(device_address_sspin, HIGH);
+        spi.endTransaction();
     }
 
     return;
@@ -395,10 +399,14 @@ void SC16IS750::GPIOLatch(uint8_t latch)
 
 bool SC16IS750::isConnected()
 {
-  	WIRE.beginTransmission(device_address_sspin);
-  	if (WIRE.endTransmission() != 0)
-    	return (false); //Sensor did not ACK
-  	return (true);
+    if (protocol == SC16IS750_PROTOCOL_SPI)
+    {
+        return ping() != 0;
+    }
+    WIRE.beginTransmission(device_address_sspin);
+    if (WIRE.endTransmission() != 0)
+        return (false); //Sensor did not ACK
+    return (true);
 }
 
 void SC16IS750::InterruptControl(uint8_t int_ena)
